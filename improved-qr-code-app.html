@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>QR Code Generator & Scanner</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jsQR/1.4.0/jsQR.min.js"></script>
+    <style>
+        :root {
+            --primary-color: #3498db;
+            --secondary-color: #2980b9;
+            --background-color: #f9f9f9;
+            --card-color: #ffffff;
+            --text-color: #333333;
+            --border-radius: 8px;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            text-align: center;
+            padding: 20px;
+            background-color: var(--background-color);
+            color: var(--text-color);
+            line-height: 1.6;
+            margin: 0;
+        }
+        
+        h2 {
+            color: var(--primary-color);
+            margin-top: 30px;
+            font-weight: 600;
+        }
+        
+        .container {
+            max-width: 600px;
+            margin: 20px auto;
+            background-color: var(--card-color);
+            padding: 25px;
+            border-radius: var(--border-radius);
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+        }
+        
+        textarea {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid #ddd;
+            border-radius: var(--border-radius);
+            box-sizing: border-box;
+            min-height: 120px;
+            font-family: inherit;
+            margin-bottom: 15px;
+            resize: vertical;
+        }
+        
+        button {
+            background-color: var(--primary-color);
+            color: white;
+            border: none;
+            padding: 12px 20px;
+            border-radius: var(--border-radius);
+            cursor: pointer;
+            font-weight: 500;
+            transition: background-color 0.3s;
+            margin: 10px 5px;
+        }
+        
+        button:hover {
+            background-color: var(--secondary-color);
+        }
+        
+        button:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
+        
+        input[type="file"] {
+            width: 100%;
+            padding: 10px 0;
+            margin-bottom: 15px;
+        }
+        
+        progress {
+            width: 100%;
+            height: 15px;
+            border-radius: 10px;
+            margin: 15px 0;
+        }
+        
+        progress::-webkit-progress-bar {
+            background-color: #f0f0f0;
+            border-radius: 10px;
+        }
+        
+        progress::-webkit-progress-value {
+            background-color: var(--primary-color);
+            border-radius: 10px;
+        }
+        
+        #qr-container, #scanner-container {
+            display: none;
+            margin-top: 20px;
+        }
+        
+        #qr-code {
+            margin: 20px auto;
+            padding: 15px;
+            background-color: white;
+            display: inline-block;
+            border-radius: var(--border-radius);
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+        }
+        
+        #video {
+            width: 100%;
+            max-height: 300px;
+            border-radius: var(--border-radius);
+            border: 2px solid var(--primary-color);
+            margin-bottom: 15px;
+        }
+        
+        .qr-navigation {
+            display: flex;
+            justify-content: center;
+            gap: 10px;
+            margin: 15px 0;
+        }
+        
+        .divider {
+            height: 1px;
+            background-color: #ddd;
+            margin: 30px 0;
+        }
+        
+        #decodedData {
+            margin: 15px 0;
+            padding: 10px;
+            background-color: #f5f5f5;
+            border-radius: var(--border-radius);
+            display: none;
+        }
+        
+        .status-text {
+            font-weight: bold;
+            color: var(--primary-color);
+        }
+        
+        .section-title {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 20px;
+        }
+        
+        .section-title i {
+            margin-right: 10px;
+            font-size: 1.5em;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h2>QR Code Generator</h2>
+        <textarea id="textInput" placeholder="Paste text here to convert into QR code(s)"></textarea>
+        <input type="file" id="fileInput" accept=".txt" title="Upload a text file">
+        <button id="generateBtn" onclick="generateQRCodes()">Generate QR Codes</button>
+        <progress id="progressBar" value="0" max="100"></progress>
+        
+        <div id="qr-container">
+            <h3>QR Code <span id="qr-index" class="status-text"></span></h3>
+            <div id="qr-code"></div>
+            <div class="qr-navigation">
+                <button onclick="prevQR()" id="prevBtn">Previous</button>
+                <button onclick="nextQR()" id="nextBtn">Next</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="divider"></div>
+
+    <div class="container">
+        <h2>QR Code Scanner</h2>
+        <button id="startScanBtn" onclick="startScanner()">Start Camera Scanner</button>
+        
+        <div id="scanner-container">
+            <video id="video" autoplay playsinline></video>
+            <canvas id="canvas" hidden></canvas>
+            <button id="stopScanBtn" onclick="stopScanner()">Stop Scanner</button>
+        </div>
+        
+        <div id="decodedData">Scanning in progress...</div>
+        <progress id="scanProgressBar" value="0" max="100"></progress>
+        <button id="downloadBtn" onclick="downloadDecodedFile()" disabled>Download Decoded File</button>
+    </div>
+
+    <script>
+        let qrChunks = [], currentQR = 0, scannedChunks = [];
+        let videoStream = null;
+        const video = document.getElementById("video");
+        const canvas = document.getElementById("canvas");
+        const context = canvas.getContext("2d");
+        const downloadBtn = document.getElementById("downloadBtn");
+
+        function generateQRCodes() {
+            const textArea = document.getElementById("textInput").value;
+            const file = document.getElementById("fileInput").files[0];
+
+            if (!textArea && !file) {
+                alert("Please enter text or upload a file.");
+                return;
+            }
+
+            if (file) {
+                let reader = new FileReader();
+                reader.onload = function (e) { splitTextIntoQR(e.target.result); };
+                reader.readAsText(file);
+            } else {
+                splitTextIntoQR(textArea);
+            }
+        }
+
+        function splitTextIntoQR(text) {
+            qrChunks = [];
+            let maxChars = 800;
+            let totalChunks = Math.ceil(text.length / maxChars);
+            
+            for (let i = 0; i < text.length; i += maxChars) {
+                let chunk = text.substring(i, i + maxChars);
+                qrChunks.push(`${chunk}|||${qrChunks.length + 1}/${totalChunks}`);
+            }
+            
+            currentQR = 0;
+            showQR();
+        }
+
+        function showQR() {
+            if (qrChunks.length === 0) return;
+            
+            document.getElementById("qr-container").style.display = "block";
+            document.getElementById("qr-index").textContent = (currentQR + 1) + " / " + qrChunks.length;
+            
+            // Clear previous QR code
+            const qrCodeElement = document.getElementById("qr-code");
+            qrCodeElement.innerHTML = "";
+            
+            // Generate new QR code
+            new QRCode(qrCodeElement, {
+                text: qrChunks[currentQR],
+                width: 250,
+                height: 250,
+                colorDark: "#000000",
+                colorLight: "#ffffff",
+                correctLevel: QRCode.CorrectLevel.H
+            });
+
+            // Update progress bar
+            document.getElementById("progressBar").value = ((currentQR + 1) / qrChunks.length) * 100;
+            
+            // Enable/disable navigation buttons
+            document.getElementById("prevBtn").disabled = (currentQR === 0);
+            document.getElementById("nextBtn").disabled = (currentQR === qrChunks.length - 1);
+        }
+
+        function nextQR() {
+            if (currentQR < qrChunks.length - 1) {
+                currentQR++;
+                showQR();
+            }
+        }
+
+        function prevQR() {
+            if (currentQR > 0) {
+                currentQR--;
+                showQR();
+            }
+        }
+
+        function startScanner() {
+            document.getElementById("scanner-container").style.display = "block";
+            document.getElementById("decodedData").style.display = "block";
+            document.getElementById("decodedData").innerText = "Scanning...";
+            
+            // Reset scanned chunks
+            scannedChunks = [];
+            document.getElementById("scanProgressBar").value = 0;
+            downloadBtn.disabled = true;
+            
+            navigator.mediaDevices.getUserMedia({ 
+                video: { 
+                    facingMode: "environment",
+                    width: { ideal: 1280 },
+                    height: { ideal: 720 }
+                } 
+            })
+            .then(stream => {
+                videoStream = stream;
+                video.srcObject = stream;
+                video.onloadedmetadata = () => {
+                    canvas.width = video.videoWidth;
+                    canvas.height = video.videoHeight;
+                    scanFrame();
+                };
+            })
+            .catch(err => {
+                alert("Camera access denied or not available: " + err.message);
+                document.getElementById("scanner-container").style.display = "none";
+            });
+        }
+
+        function stopScanner() {
+            if (videoStream) {
+                videoStream.getTracks().forEach(track => track.stop());
+                videoStream = null;
+            }
+            document.getElementById("scanner-container").style.display = "none";
+        }
+
+        function scanFrame() {
+            if (!videoStream) return;
+            
+            context.drawImage(video, 0, 0, canvas.width, canvas.height);
+            
+            let imageData = context.getImageData(0, 0, canvas.width, canvas.height);
+            let qrResult = jsQR(imageData.data, imageData.width, imageData.height);
+
+            if (qrResult) {
+                try {
+                    let parts = qrResult.data.split("|||");
+                    if (parts.length >= 2) {
+                        let scannedText = parts[0];
+                        let indexInfo = parts[1];
+                        let [currentIndex, totalChunks] = indexInfo.split('/').map(Number);
+                        
+                        // Check if this chunk is already scanned
+                        let existingChunk = scannedChunks.find(chunk => chunk.index === currentIndex);
+                        if (!existingChunk) {
+                            scannedChunks.push({ index: currentIndex, text: scannedText });
+                            scannedChunks.sort((a, b) => a.index - b.index);
+                            
+                            // Update UI
+                            document.getElementById("decodedData").innerText = 
+                                `Scanned ${scannedChunks.length} of ${totalChunks} QR codes`;
+                            document.getElementById("scanProgressBar").value = 
+                                (scannedChunks.length / totalChunks) * 100;
+                            
+                            // Enable download button if all chunks are scanned
+                            if (scannedChunks.length === totalChunks) {
+                                downloadBtn.disabled = false;
+                                document.getElementById("decodedData").innerText = 
+                                    `All ${totalChunks} QR codes scanned successfully! You can now download the file.`;
+                            }
+                        }
+                    }
+                } catch (e) {
+                    console.error("Error processing QR code:", e);
+                }
+            }
+
+            requestAnimationFrame(scanFrame);
+        }
+
+        function downloadDecodedFile() {
+            if (scannedChunks.length === 0) {
+                alert("No QR codes have been scanned yet.");
+                return;
+            }
+            
+            let finalText = scannedChunks.map(chunk => chunk.text).join('');
+            let blob = new Blob([finalText], { type: "text/plain" });
+            let link = document.createElement("a");
+            link.href = URL.createObjectURL(blob);
+            link.download = "decoded.txt";
+            link.click();
+        }
+    </script>
+</body>
+</html>
